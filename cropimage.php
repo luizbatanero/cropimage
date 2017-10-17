@@ -25,17 +25,21 @@ class CropImage
             $width       = $config['width'];
             $height      = $config['height'];
             $path        = $config['path'].$name;
+            $upsize      = (array_key_exists('upsize', $config) ? $config['upsize'] : false);
 
             $imgobj = Image::make($image->getRealPath());
 
             if ($width == null && $height == null) {
                 $imgobj->save($path, 100);
             } elseif ($width == null || $height == null) {
-                $imgobj->resize($width, $height, function($constraint) {
+                $imgobj->resize($width, $height, function($constraint) use ($upsize) {
                     $constraint->aspectRatio();
+                    if ($upsize) { $constraint->upsize(); }
                 })->save($path, 100);
             } else {
-                $imgobj->fit($width, $height})->save($path, 100);
+                $imgobj->fit($width, $height, function ($constraint) use ($upsize) {
+                    if ($upsize) { $constraint->upsize(); }
+                })->save($path, 100);
             }
 
             $imgobj->destroy();
