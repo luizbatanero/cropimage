@@ -17,6 +17,10 @@ class CropImage
 
         $name = str_slug(pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME)).'_'.date('YmdHis').'.'.$image->getClientOriginalExtension();
 
+        if (!file_exists(public_path($config['path']))) {
+            mkdir(public_path($config['path']), 0777, true);
+        }
+
         foreach($object as $config) {
             $width       = $config['width'];
             $height      = $config['height'];
