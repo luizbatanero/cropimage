@@ -28,16 +28,17 @@ class CropImage
             $name = str_slug(pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME)).'_'.date('YmdHis').'.'.$image->getClientOriginalExtension();
         }
 
-        if (!file_exists(public_path($config['path']))) {
-            mkdir(public_path($config['path']), 0777, true);
-        }
-
         foreach($object as $config) {
             $width       = $config['width'];
             $height      = $config['height'];
             $path        = $config['path'].$name;
             $upsize      = (array_key_exists('upsize', $config) ? $config['upsize'] : false);
+            $bgcolor     = (array_key_exists('bgcolor', $config) ? $config['bgcolor'] : false);
             $transparent = array_key_exists('transparent', $config);
+
+            if (!file_exists(public_path($config['path']))) {
+                mkdir(public_path($config['path']), 0777, true);
+            }
 
             $imgobj = Image::make($image->getRealPath());
 
@@ -48,6 +49,13 @@ class CropImage
                     $constraint->aspectRatio();
                     if ($upsize) { $constraint->upsize(); }
                 })->save($path, 100);
+            } elseif ($bgcolor) {
+                $canvas = Image::canvas($width, $height, $bgcolor);
+                $imagem = Image::make($imgobj)->resize($width, $height, function($constraint)
+                {
+                    $constraint->aspectRatio();
+                });
+                $canvas->insert($imagem, 'center')->save($path, 100);
             } elseif ($transparent) {
                 $canvas = Image::canvas($width, $height);
                 $imagem = Image::make($imgobj)->resize($width, $height, function($constraint)
