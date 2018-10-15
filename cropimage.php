@@ -2,77 +2,160 @@
 
 namespace App\Helpers;
 
-use Request, Image;
+use Image;
 
 class CropImage
 {
-
-    public static function make($input, $object)
+    public static function make($input, $options)
     {
-        if (!Request::hasFile($input) || !$object) return false;
+        self::validate($input, $options);
 
-        $image = Request::file($input);
+        $options = self::normalizeOptions($options);
 
-        if (!is_array(array_values($object)[0])) $object = array($object);
+        $imageFile = request()->file($input);
+        $imageName = self::getName($imageFile, $options);
 
-        $isTransparent = false;
-        foreach ($object as $config) {
-            if (array_key_exists('transparent', $config)) {
-                $isTransparent = true;
-            }
-        }
+        foreach($options as $config) {
+            self::checkPathDir($config['path']);
 
-        if ($isTransparent) {
-            $name = str_slug(pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME)).'_'.date('YmdHis').'.png';
-        } else {
-            $name = str_slug(pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME)).'_'.date('YmdHis').'.'.$image->getClientOriginalExtension();
-        }
+            $imageInstance = Image::make($imageFile->getRealPath());
 
-        foreach($object as $config) {
-            $width       = $config['width'];
-            $height      = $config['height'];
-            $path        = $config['path'].$name;
-            $upsize      = (array_key_exists('upsize', $config) ? $config['upsize'] : false);
-            $bgcolor     = (array_key_exists('bgcolor', $config) ? $config['bgcolor'] : false);
-            $transparent = array_key_exists('transparent', $config);
-
-            if (!file_exists(public_path($config['path']))) {
-                mkdir(public_path($config['path']), 0777, true);
-            }
-
-            $imgobj = Image::make($image->getRealPath());
+            $width  = $config['width'];
+            $height = $config['height'];
+            $path   = $config['path'].$imageName;
+            $upsize = self::upsizeConstraint($config);
 
             if ($width == null && $height == null) {
-                $imgobj->save($path, 100);
+                self::saveOriginal($path, $imageInstance);
             } elseif ($width == null || $height == null) {
-                $imgobj->resize($width, $height, function($constraint) use ($upsize) {
-                    $constraint->aspectRatio();
-                    if ($upsize) { $constraint->upsize(); }
-                })->save($path, 100);
-            } elseif ($bgcolor) {
-                $canvas = Image::canvas($width, $height, $bgcolor);
-                $imagem = Image::make($imgobj)->resize($width, $height, function($constraint)
-                {
-                    $constraint->aspectRatio();
-                });
-                $canvas->insert($imagem, 'center')->save($path, 100);
-            } elseif ($transparent) {
-                $canvas = Image::canvas($width, $height);
-                $imagem = Image::make($imgobj)->resize($width, $height, function($constraint)
-                {
-                    $constraint->aspectRatio();
-                });
-                $canvas->insert($imagem, 'center')->save($path, 100);
+                self::saveResize(
+                    $path, $imageInstance, $width, $height, $upsize
+                );
+            } elseif ($color = self::getColor($config)) {
+                self::saveColor(
+                    $path, $imageInstance, $width, $height, $color, $upsize
+                );
+            } elseif (self::isTransparent($config)) {
+                self::saveTransparent(
+                    $path, $imageInstance, $width, $height, $upsize
+                );
             } else {
-                $imgobj->fit($width, $height, function ($constraint) use ($upsize) {
-                    if ($upsize) { $constraint->upsize(); }
-                })->save($path, 100);
+                self::saveFit(
+                    $path, $imageInstance, $width, $height, $upsize
+                );
             }
 
-            $imgobj->destroy();
+            $imageInstance->destroy();
         }
+
+        return $imageName;
+    }
+
+    private static function validate($input, $options)
+    {
+        if (!request()->hasFile($input)) {
+            throw new \Exception('CropImage: File not found.');
+        }
+
+        if (!$options) {
+            throw new \Exception('CropImage: Options missing.');
+        }
+    }
+
+    public static function normalizeOptions($options) {
+        return !is_array(array_values($options)[0]) ? array($options) : $options;
+    }
+
+    public static function hasTransparent($options) {
+        foreach ($options as $config) {
+            if (array_key_exists('transparent', $config)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function getName($image, $options)
+    {
+        $extension = self::hasTransparent($options)
+            ? 'png'
+            : $image->getClientOriginalExtension();
+
+        $name  = str_slug(
+            pathinfo($image->getClientOriginalName(), PATHINFO_FILENAME)
+        );
+        $name .= '_'.date('YmdHis');
+        $name .= str_random(10);
+        $name .= '.'.$extension;
 
         return $name;
     }
 
+    public static function checkPathDir($path)
+    {
+        if (!file_exists(public_path($path))) {
+            mkdir(public_path($path), 0777, true);
+        }
+    }
+
+    public static function upsizeConstraint($config)
+    {
+        return array_key_exists('upsize', $config) && $config['upsize'];
+    }
+
+    public static function isTransparent($config)
+    {
+        return array_key_exists('transparent', $config) && $config['transparent'];
+    }
+
+    public static function getColor($config)
+    {
+        return array_key_exists('color', $config) ? $config['color'] : false;
+    }
+
+    public static function saveOriginal($path, $image)
+    {
+        return $image->save($path, 100);
+    }
+
+    public static function saveResize($path, $image, $width, $height, $upsize)
+    {
+        return $image->resize($width, $height, function($constraint) use ($upsize) {
+            $constraint->aspectRatio();
+            if ($upsize) { $constraint->upsize(); }
+        })->save($path, 100);
+    }
+
+    public static function saveColor($path, $image, $width, $height, $color, $upsize)
+    {
+        $canvas = Image::canvas($width, $height, $color);
+        $image  = Image::make($image)->resize($width, $height, function($constraint) use ($upsize)
+        {
+            $constraint->aspectRatio();
+            if ($upsize) { $constraint->upsize(); }
+        });
+
+        return $canvas->insert($image, 'center')->save($path, 100);
+    }
+
+    public static function saveTransparent($path, $image, $width, $height, $upsize)
+    {
+        $canvas = Image::canvas($width, $height);
+        $image  = Image::make($image)->resize($width, $height, function($constraint) use ($upsize)
+        {
+            $constraint->aspectRatio();
+            if ($upsize) { $constraint->upsize(); }
+        });
+
+        return $canvas->insert($image, 'center')->save($path, 100);
+    }
+
+    public static function saveFit($path, $image, $width, $height, $upsize)
+    {
+        return $image->fit($width, $height, function ($constraint) use ($upsize)
+        {
+            if ($upsize) { $constraint->upsize(); }
+        })->save($path, 100);
+    }
 }
